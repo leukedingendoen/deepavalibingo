@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Serverless Bingo – Host & Player (host-only salt + auto sync)</title>
+  <title>Serverless Bingo – Host & Player (fixed host token + auto sync)</title>
   <style>
     :root { --bg:#0f172a; --card:#111827; --ink:#e5e7eb; --muted:#94a3b8; --accent:#22c55e; --danger:#ef4444; --brand:#38bdf8; }
     *{box-sizing:border-box}
@@ -18,7 +18,7 @@
     h2{font-size:20px;margin:8px 0 12px}
     label{display:block;font-size:14px;color:var(--muted);margin-bottom:6px}
     input,select,button,textarea{font:inherit}
-    input,select,textarea{width:100%;padding:10px 12px;border-radius:12px;border:1px solid #334155;background:#0b1220;color:#ink}
+    input,select,textarea{width:100%;padding:10px 12px;border-radius:12px;border:1px solid #334155;background:#0b1220;color:var(--ink)}
     .grid{display:grid;gap:12px}
     .grid.cols-2{grid-template-columns:1fr 1fr}
     .grid.cols-3{grid-template-columns:repeat(3,1fr)}
@@ -56,7 +56,9 @@
     .lock{border:1px dashed #334155;padding:12px;border-radius:12px;color:#eab308;background:#0b1220}
 
     @media (max-width: 900px){ .host-stage{grid-template-columns:1fr} }
-  </style>
+    input,select,textarea{caret-color:var(--ink);} 
+  input::placeholder, textarea::placeholder{color:var(--muted);opacity:1}
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -69,13 +71,6 @@
     <div class="host-stage">
       <div class="panel sticky">
         <h2>Host controls</h2>
-        <div id="hostLock" class="lock hide">
-          <strong>Private host link required.</strong>
-          <div class="small">Click below to generate a private host URL (prevents guessing).</div>
-          <div class="row" style="margin-top:8px">
-            <button class="btn primary" id="genHostLinkBtn">Generate private host link</button>
-          </div>
-        </div>
         <div class="grid cols-2">
           <div>
             <label>Room code / seed</label>
@@ -116,19 +111,19 @@
         <textarea id="verifyText" rows="4" placeholder="Paste claim code here"></textarea>
         <div class="row" style="margin-top:8px"><button class="btn" id="verifyBtn">Verify</button> <span id="verifyResult" class="small"></span></div>
         <hr style="border-color:#1f2937;margin:14px 0">
-        <h2>Share links</h2>
+        <h2>Links</h2>
         <div class="small">Players open:
           <div class="mono" id="shareUrl"></div>
           Seed / Room code: <span class="mono" id="seedEcho">(enter above)</span>
         </div>
-        <div class="small" style="margin-top:8px">Host private link (bookmark this):
-          <div class="mono" id="hostUrl">(click “Generate private host link”)</div>
+        <div class="small" style="margin-top:8px">Host link (fixed token):
+          <div class="mono" id="hostUrl"></div>
         </div>
       </div>
     </div>
   </div>
 
-  <div id="playerView" class="panel hide">
+  <div id="playerView" class="panel hide"> class="panel hide">
     <div class="grid cols-3">
       <div>
         <label>Your name (used to make a unique card)</label>
@@ -182,19 +177,10 @@
   // ===== 0) Put your Firebase config here once (players do NOT touch this) =====
   // Get from Firebase console → Project settings → Your apps → SDK setup & config (web)
   // Leave as null to disable live sync.
-  //const FIREBASE_CFG = null; // e.g., { apiKey:"…", authDomain:"…", projectId:"…" }
-  const FIREBASE_CFG = { apiKey: "AIzaSyDoJeplkPPNZ8u3a57lQgGyf2cJX5JuC_Y", authDomain: "deepavalibingo.firebaseapp.com", projectId: "deepavalibingo" };
-  
-  // ===== Utilities: seeded PRNG (xmur3 + mulberry32), hashing, shuffling =====
-  function xmur3(str){ let h=1779033703^str.length; for(let i=0;i<str.length;i++){ h=Math.imul(h^str.charCodeAt(i),3432918353); h=h<<13|h>>>19; } return ()=>{ h=Math.imul(h^ (h>>>16),2246822507); h=Math.imul(h^ (h>>>13),3266489909); return (h^ (h>>>16))>>>0; } }
-  function mulberry32(a){ return function(){ let t=a+=0x6D2B79F5; t=Math.imul(t^(t>>>15),t|1); t^=t+Math.imul(t^(t>>>7),t|61); return ((t^(t>>>14))>>>0)/4294967296; } }
-  function prngFromSeed(seedStr){ const seedGen=xmur3(seedStr); const a=seedGen(); return mulberry32(a); }
-  function shuffle(arr, rnd){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(rnd()* (i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; }
-  function range(n, start=1){ return Array.from({length:n}, (_,i)=>i+start); }
-  function bLetter(n){ if(n<=15) return 'B'; if(n<=30) return 'I'; if(n<=45) return 'N'; if(n<=60) return 'G'; return 'O'; }
+  const FIREBASE_CFG = { apiKey: "AIzaSyDoJeplkPPNZ8u3a57lQgGyf2cJX5JuC_Y", authDomain: "deepavalibingo.firebaseapp.com", projectId: "deepavalibingo" }; // e.g., { apiKey:"…", authDomain:"…", projectId:"…" };
 
-  // ===== Card generation (75-ball) deterministic on seed+name =====
-  function makeCard(seed, name){ const key=(seed+"|"+name.trim().toUpperCase()); const rnd=prngFromSeed(key);
+  // ===== Fixed host token (numeric string). Change this to your random number. =====
+  const HOST_TOKEN = "428731"; // <- change me to your own random number
     const cols=[range(15,1), range(15,16), range(15,31), range(15,46), range(15,61)];
     const card=[[],[],[],[],[]];
     for(let c=0;c<5;c++){ const col=shuffle(cols[c].slice(), rnd).slice(0,5); for(let r=0;r<5;r++){ card[r][c]=col[r]; } }
@@ -276,8 +262,8 @@
   const modePill=qs('#modePill');
 
   const url=new URL(location.href);
-  const hostToken = url.searchParams.get('host')||''; // must be non-trivial
-  const isHost = !!hostToken && hostToken!=='1' && hostToken.length>=6;
+  const hostParam = (new URL(location.href)).searchParams.get('host') || '';
+  const isHost = hostParam === HOST_TOKEN;
   modePill.textContent = isHost? 'HOST MODE' : 'PLAYER MODE';
   hostView.classList.toggle('hide', !isHost);
   playerView.classList.toggle('hide', isHost);
@@ -307,12 +293,10 @@
 
   function generateToken(len=10){ const chars='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'; let s=''; const arr=new Uint8Array(len); (self.crypto||window.crypto).getRandomValues(arr); arr.forEach(v=> s+=chars[v%chars.length]); return s; }
 
-  function ensureHostLink(){
+  function setShareLinks(){
     const base = location.origin + location.pathname;
     shareUrl.textContent = base; // players open plain URL
-    if(!isHost){ hostLock.classList.remove('hide'); return; }
-    hostLock.classList.add('hide');
-    hostUrl.textContent = base + '?host=' + host.key;
+    hostUrl.textContent = base + '?host=' + HOST_TOKEN;
   }
 
   function setSalt(newSalt){ host.salt = String(newSalt); if(host.seed){ localStorage.setItem('bingoSalt:'+host.seed, host.salt); } }
@@ -354,28 +338,15 @@
   })();
 
   if(isHost){
-    ensureHostLink();
     patternSelect.addEventListener('change', e=> { host.pattern = e.target.value; pushSyncState(); });
     startBtn.addEventListener('click', ()=>{ host.seed=(seedInput.value||'').trim(); if(!host.seed){ alert('Please enter a room code / seed'); return; } resetHost(); });
     prevBtn.addEventListener('click', prev);
     nextBtn.addEventListener('click', next);
     undoBtn.addEventListener('click', undo);
     newRoundBtn.addEventListener('click', ()=>{ setSalt((self.crypto||window.crypto).getRandomValues(new Uint32Array(1))[0]); resetHost(); });
-  } else {
-    hostLock.classList.remove('hide');
   }
 
-  if(genHostLinkBtn){ genHostLinkBtn.addEventListener('click', ()=>{
-    const token = generateToken(12);
-    const sp = new URLSearchParams(location.search);
-    sp.set('host', token);
-    history.replaceState(null, '', location.pathname + '?' + sp.toString());
-    host.key = token;
-    modePill.textContent = 'HOST MODE';
-    hostView.classList.remove('hide'); playerView.classList.add('hide'); hostLock.classList.add('hide');
-    ensureHostLink();
-  }); }
-
+  
   // ===== PLAYER LOGIC =====
   const nameInput=qs('#nameInput');
   const seedJoin=qs('#seedJoin');
@@ -489,7 +460,7 @@
   if(nameHash && !isHost){ nameInput.value=nameHash; }
 
   // Initial share links
-  ensureHostLink();
+  setShareLinks();
 </script>
 </body>
 </html>
