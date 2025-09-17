@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Serverless Bingo – Host & Player</title>
+  <style>
+    :root { --bg:#0f172a; --card:#111827; --ink:#e5e7eb; --muted:#94a3b8; --accent:#22c55e; --danger:#ef4444; --brand:#38bdf8; }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,sans-serif;background:linear-gradient(180deg,#0b1220,#0f172a 40%,#0b1220);color:var(--ink);}
+    a{color:var(--brand)}
+    .wrap{max-width:1100px;margin:0 auto;padding:16px 20px 48px}
+    header{display:flex;gap:16px;align-items:center;justify-content:space-between;margin:8px 0 16px}
+    .pill{background:#1f2937;padding:6px 12px;border-radius:999px;color:var(--muted);font-size:14px}
+    .panel{background:rgba(17,24,39,.8);backdrop-filter: blur(6px);border:1px solid #1f2937;border-radius:16px;padding:16px;margin:12px 0}
+    h1{font-size:clamp(22px,3vw,32px);margin:0}
+    h2{font-size:20px;margin:8px 0 12px}
+    label{display:block;font-size:14px;color:var(--muted);margin-bottom:6px}
+    input,select,button,textarea{font:inherit}
+    input,select,textarea{width:100%;padding:10px 12px;border-radius:12px;border:1px solid #334155;background:#0b1220;color:var(--ink)}
+    .grid{display:grid;gap:12px}
+    .grid.cols-2{grid-template-columns:1fr 1fr}
+    .grid.cols-3{grid-template-columns:repeat(3,1fr)}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .btn{background:#1f2937;border:1px solid #334155;color:#e5e7eb;padding:10px 14px;border-radius:12px;cursor:pointer}
+    .btn:hover{filter:brightness(1.1)}
+    .btn.primary{background:linear-gradient(90deg,#22c55e,#16a34a);border-color:#15803d}
+    .btn.warn{background:linear-gradient(90deg,#f97316,#ea580c);border-color:#c2410c}
+    .btn.danger{background:linear-gradient(90deg,#ef4444,#dc2626);border-color:#b91c1c}
+    .btn.ghost{background:transparent;border:1px dashed #334155;color:#9ca3af}
+
+    .bingo{display:grid;grid-template-columns:repeat(5,1fr);border-radius:16px;overflow:hidden;border:1px solid #374151}
+    .bingo .cell{position:relative;aspect-ratio:1/1;display:grid;place-items:center;border-right:1px solid #374151;border-bottom:1px solid #374151;font-weight:700;font-size:clamp(16px,4vw,28px)}
+    .bingo .cell:nth-child(5n){border-right:none}
+    .bingo .cell.header{background:#0b1220;color:#93c5fd;letter-spacing:2px}
+    .bingo .cell.free{background:#0b1220;color:#34d399}
+    .bingo .cell.marked{background:#134e4a}
+    .bingo .cell.hit{outline:3px solid #22c55e;outline-offset:-3px}
+    .legend{font-size:14px;color:var(--muted)}
+
+    .host-stage{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}
+    .ball{font-size:clamp(48px,9vw,140px);font-weight:900;line-height:1;text-align:center;margin:6px 0}
+    .ball.badge{font-size:clamp(14px,2.2vw,22px);font-weight:700;letter-spacing:2px;color:#93c5fd}
+
+    .draws{display:flex;flex-wrap:wrap;gap:8px}
+    .chip{padding:8px 10px;border-radius:10px;background:#0b1220;border:1px solid #334155;min-width:44px;text-align:center}
+    .chip.recent{border-color:#22c55e}
+
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
+    .small{font-size:12px;color:var(--muted)}
+    .center{text-align:center}
+    .hide{display:none}
+    .sticky{position:sticky;top:10px}
+    footer{margin-top:24px;color:#94a3b8;font-size:13px}
+
+    @media (max-width: 900px){ .host-stage{grid-template-columns:1fr} }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Serverless Bingo</h1>
+    <div class="pill" id="modePill">mode</div>
+  </header>
+
+  <div id="hostView" class="panel hide">
+    <div class="host-stage">
+      <div class="panel sticky">
+        <h2>Host controls</h2>
+        <div class="grid cols-2">
+          <div>
+            <label>Room code / seed</label>
+            <input id="seedInput" placeholder="e.g. DIWALI-2025" />
+          </div>
+          <div>
+            <label>Winning pattern</label>
+            <select id="patternSelect">
+              <option value="line">Any line (row/column/diagonal)</option>
+              <option value="four">Four corners</option>
+              <option value="full">Full house</option>
+            </select>
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn primary" id="startBtn">Start / Reset</button>
+          <button class="btn" id="prevBtn">⟵ Prev</button>
+          <button class="btn" id="nextBtn">Next ⟶</button>
+          <button class="btn warn" id="undoBtn">Undo last</button>
+        </div>
+        <div class="panel" style="margin-top:12px">
+          <div class="ball badge" id="ballBadge">B</div>
+          <div class="ball" id="bigBall">–</div>
+          <div class="center small">Project this panel on screen</div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>History</h2>
+        <div id="draws" class="draws"></div>
+        <div class="small" style="margin-top:8px">Total drawn: <span id="drawCount">0</span> / 75</div>
+        <hr style="border-color:#1f2937;margin:14px 0">
+        <h2>Verify a claim</h2>
+        <p class="small">Ask player to press <em>Call Bingo</em> → copy the claim code and paste it here.</p>
+        <textarea id="verifyText" rows="4" placeholder="Paste claim code here"></textarea>
+        <div class="row" style="margin-top:8px"><button class="btn" id="verifyBtn">Verify</button> <span id="verifyResult" class="small"></span></div>
+        <hr style="border-color:#1f2937;margin:14px 0">
+        <h2>Share with players</h2>
+        <div class="small">Ask everyone to open:
+          <div class="mono" id="shareUrl"></div>
+          Seed / Room code: <span class="mono" id="seedEcho">(enter above)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="playerView" class="panel hide">
+    <div class="grid cols-3">
+      <div>
+        <label>Your name (used to make a unique card)</label>
+        <input id="nameInput" placeholder="e.g. Priya" />
+      </div>
+      <div>
+        <label>Room code / seed (from host)</label>
+        <input id="seedJoin" placeholder="e.g. DIWALI-2025" />
+      </div>
+      <div class="row" style="align-self:end">
+        <button class="btn primary" id="makeCardBtn">Make card</button>
+        <button class="btn ghost" id="clearMarksBtn">Clear marks</button>
+      </div>
+    </div>
+
+    <div id="cardZone" class="panel hide">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2 id="cardTitle">Your card</h2>
+        <div class="legend">Tap numbers to mark / unmark</div>
+      </div>
+      <div id="card" class="bingo"></div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn" id="bingoBtn">Call Bingo 🎉</button>
+        <span class="small">Show this to the host to verify</span>
+      </div>
+      <div id="claimWrap" class="panel hide">
+        <label>Your claim code (copy & share with host)</label>
+        <textarea id="claimText" rows="3" readonly></textarea>
+        <div class="row" style="margin-top:8px">
+          <button class="btn" id="copyClaimBtn">Copy code</button>
+          <span id="copyMsg" class="small"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <strong>How it works</strong>: Host chooses a seed (room code) and projects the host screen. Players generate unique cards on their phones using the same seed and their name. When someone calls Bingo, the host verifies the claim code against the official draw history. No logins, servers, or fees.
+  </footer>
+</div>
+
+<script>
+  // ===== Utilities: seeded PRNG (xmur3 + mulberry32), hashing, shuffling =====
+  function xmur3(str){ let h=1779033703^str.length; for(let i=0;i<str.length;i++){ h=Math.imul(h^str.charCodeAt(i),3432918353); h=h<<13|h>>>19; } return ()=>{ h=Math.imul(h^ (h>>>16),2246822507); h=Math.imul(h^ (h>>>13),3266489909); return (h^ (h>>>16))>>>0; } }
+  function mulberry32(a){ return function(){ let t=a+=0x6D2B79F5; t=Math.imul(t^(t>>>15),t|1); t^=t+Math.imul(t^(t>>>7),t|61); return ((t^(t>>>14))>>>0)/4294967296; } }
+  function prngFromSeed(seedStr){ const seedGen=xmur3(seedStr); const a=seedGen(); return mulberry32(a); }
+  function shuffle(arr, rnd){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(rnd()* (i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; }
+  function range(n, start=1){ return Array.from({length:n}, (_,i)=>i+start); }
+  function bLetter(n){ if(n<=15) return 'B'; if(n<=30) return 'I'; if(n<=45) return 'N'; if(n<=60) return 'G'; return 'O'; }
+
+  // ===== Card generation (75-ball) deterministic on seed+name =====
+  function makeCard(seed, name){ const key=(seed+"|"+name.trim().toUpperCase()); const rnd=prngFromSeed(key);
+    const cols=[range(15,1), range(15,16), range(15,31), range(15,46), range(15,61)];
+    const card=[[],[],[],[],[]];
+    for(let c=0;c<5;c++){ const col=shuffle(cols[c].slice(), rnd).slice(0,5); for(let r=0;r<5;r++){ card[r][c]=col[r]; } }
+    // free center
+    card[2][2] = 'FREE';
+    return card; // 5x5 [row][col]
+  }
+
+  // ===== Draw order based on seed only =====
+  function makeDrawOrder(seed){ const nums=range(75,1); const rnd=prngFromSeed(seed+"|DRAW"); return shuffle(nums, rnd); }
+
+  // ===== Pattern checks =====
+  function isWinning(card, marks, pattern){
+    const isMarked=(r,c)=> (r===2 && c===2) ? true : !!marks[r][c];
+    const full = pattern==='full';
+    if(pattern==='four'){
+      return isMarked(0,0)&&isMarked(0,4)&&isMarked(4,0)&&isMarked(4,4);
+    }
+    // line or full
+    // rows
+    for(let r=0;r<5;r++){
+      let ok=true; for(let c=0;c<5;c++){ if(!isMarked(r,c)) { ok=false; break; } }
+      if(ok) return true;
+    }
+    // cols
+    for(let c=0;c<5;c++){
+      let ok=true; for(let r=0;r<5;r++){ if(!isMarked(r,c)) { ok=false; break; } }
+      if(ok) return true;
+    }
+    // diagonals
+    let ok=true; for(let i=0;i<5;i++){ if(!isMarked(i,i)){ ok=false; break; } } if(ok) return true;
+    ok=true; for(let i=0;i<5;i++){ if(!isMarked(i,4-i)){ ok=false; break; } } if(ok) return true;
+
+    if(full){ // if pattern is full, above would have caught, but keep explicit
+      let all=true; for(let r=0;r<5;r++){ for(let c=0;c<5;c++){ if(!isMarked(r,c)) { all=false; break; } } }
+      if(all) return true;
+    }
+    return false;
+  }
+
+  // ===== Encode/Decode claim =====
+  function encodeClaim(seed, pattern, playerName, card, marks){
+    // flatten numbers (FREE as 0), marks as 0/1
+    const nums=[]; const mk=[];
+    for(let r=0;r<5;r++){ for(let c=0;c<5;c++){ nums.push(card[r][c]==='FREE'?0:card[r][c]); mk.push((r===2&&c===2)?1:(marks[r][c]?1:0)); } }
+    const payload={v:1,seed,pat:pattern,p:playerName.trim(),nums,mk};
+    const json=JSON.stringify(payload);
+    return btoa(unescape(encodeURIComponent(json))); // base64
+  }
+  function decodeClaim(code){ try{ const json=decodeURIComponent(escape(atob(code.trim()))); const obj=JSON.parse(json); return obj; }catch(e){ return null; } }
+
+  // ===== Build UI =====
+  const qs=(s)=>document.querySelector(s);
+  const hostView=qs('#hostView');
+  const playerView=qs('#playerView');
+  const modePill=qs('#modePill');
+
+  const url=new URL(location.href);
+  const isHost = url.searchParams.get('host')==='1';
+  modePill.textContent = isHost? 'HOST MODE' : 'PLAYER MODE';
+  hostView.classList.toggle('hide', !isHost);
+  playerView.classList.toggle('hide', isHost);
+
+  // ===== HOST LOGIC =====
+  let host={ seed:'', pattern:'line', order:[], idx:-1, drawn:new Set() };
+  const seedInput=qs('#seedInput');
+  const patternSelect=qs('#patternSelect');
+  const startBtn=qs('#startBtn');
+  const prevBtn=qs('#prevBtn');
+  const nextBtn=qs('#nextBtn');
+  const undoBtn=qs('#undoBtn');
+  const bigBall=qs('#bigBall');
+  const ballBadge=qs('#ballBadge');
+  const drawsDiv=qs('#draws');
+  const drawCount=qs('#drawCount');
+  const shareUrl=qs('#shareUrl');
+  const seedEcho=qs('#seedEcho');
+  const verifyText=qs('#verifyText');
+  const verifyBtn=qs('#verifyBtn');
+  const verifyResult=qs('#verifyResult');
+
+  function renderHistory(){
+    drawsDiv.innerHTML='';
+    const arr=[...host.drawn].sort((a,b)=>a-b);
+    const recent = host.order[host.idx]||null;
+    arr.forEach(n=>{
+      const d=document.createElement('div'); d.className='chip'+(n===recent?' recent':''); d.textContent=(bLetter(n))+n; drawsDiv.appendChild(d);
+    });
+    drawCount.textContent = host.drawn.size;
+  }
+  function renderBall(){
+    const n = host.order[host.idx];
+    if(n){ bigBall.textContent=n; ballBadge.textContent=bLetter(n); }
+    else { bigBall.textContent='–'; ballBadge.textContent='BINGO'; }
+  }
+  function resetHost(){
+    host.order = makeDrawOrder(host.seed);
+    host.idx=-1; host.drawn.clear();
+    renderBall(); renderHistory();
+    seedEcho.textContent = host.seed||'(enter above)';
+    shareUrl.textContent = location.origin + location.pathname + '  (players do NOT add ?host=1)';
+  }
+  function next(){ if(!host.seed){ alert('Enter a seed first.'); return; } if(host.idx < host.order.length-1){ host.idx++; host.drawn.add(host.order[host.idx]); renderBall(); renderHistory(); } }
+  function prev(){ if(host.idx>0){ host.idx--; renderBall(); /* do not remove from drawn */ } }
+  function undo(){ if(host.idx>=0){ const last=host.order[host.idx]; host.drawn.delete(last); host.idx--; renderBall(); renderHistory(); } }
+
+  if(isHost){
+    patternSelect.addEventListener('change', e=> host.pattern = e.target.value );
+    startBtn.addEventListener('click', ()=>{ host.seed=(seedInput.value||'').trim(); if(!host.seed){ alert('Please enter a room code / seed'); return; } resetHost(); });
+    prevBtn.addEventListener('click', prev);
+    nextBtn.addEventListener('click', next);
+    undoBtn.addEventListener('click', undo);
+
+    verifyBtn.addEventListener('click', ()=>{
+      verifyResult.textContent='';
+      const code = verifyText.value.trim(); if(!code){ return; }
+      const claim=decodeClaim(code); if(!claim){ verifyResult.textContent='Invalid code'; verifyResult.style.color='var(--danger)'; return; }
+      if((claim.seed||'').trim() !== host.seed.trim()){ verifyResult.textContent='Wrong room code / seed'; verifyResult.style.color='var(--danger)'; return; }
+      // Rebuild expected card from seed+player name
+      const expected = makeCard(host.seed, claim.p||'');
+      // build expected flat nums
+      const numsFlat=[]; for(let r=0;r<5;r++){ for(let c=0;c<5;c++){ numsFlat.push(expected[r][c]==='FREE'?0:expected[r][c]); } }
+      const sameCard = JSON.stringify(numsFlat) === JSON.stringify(claim.nums);
+      if(!sameCard){ verifyResult.textContent='Card does not match player for this seed (possible tamper)'; verifyResult.style.color='var(--danger)'; return; }
+      // Build marks matrix from claim
+      const marks=[ [false,false,false,false,false], [false,false,false,false,false], [false,false,true,false,false], [false,false,false,false,false], [false,false,false,false,false] ];
+      let k=0; for(let r=0;r<5;r++){ for(let c=0;c<5;c++){ if(!(r===2&&c===2)) marks[r][c] = !!claim.mk[k]; k++; } }
+      // Validate all marked numbers are actually drawn
+      for(let r=0;r<5;r++){ for(let c=0;c<5;c++){ const val=expected[r][c]; if(r===2&&c===2) continue; if(marks[r][c]){ if(!host.drawn.has(val)){ verifyResult.textContent='Marked numbers include undrawn numbers'; verifyResult.style.color='var(--danger)'; return; } } } }
+      // Check pattern
+      const ok = isWinning(expected, marks, claim.pat || host.pattern);
+      if(!ok){ verifyResult.textContent='Pattern not satisfied'; verifyResult.style.color='var(--danger)'; return; }
+      verifyResult.textContent='✅ Bingo VALID for '+(claim.p||'player'); verifyResult.style.color='var(--accent)';
+    });
+  }
+
+  // ===== PLAYER LOGIC =====
+  const nameInput=qs('#nameInput');
+  const seedJoin=qs('#seedJoin');
+  const makeCardBtn=qs('#makeCardBtn');
+  const clearMarksBtn=qs('#clearMarksBtn');
+  const cardZone=qs('#cardZone');
+  const cardDiv=qs('#card');
+  const cardTitle=qs('#cardTitle');
+  const bingoBtn=qs('#bingoBtn');
+  const claimWrap=qs('#claimWrap');
+  const claimText=qs('#claimText');
+  const copyClaimBtn=qs('#copyClaimBtn');
+  const copyMsg=qs('#copyMsg');
+
+  let player={ name:'', seed:'', card:null, marks:null };
+
+  function renderCard(){
+    cardDiv.innerHTML='';
+    const headers=['B','I','N','G','O'];
+    headers.forEach(h=>{ const d=document.createElement('div'); d.className='cell header'; d.textContent=h; cardDiv.appendChild(d); });
+    for(let r=0;r<5;r++){
+      for(let c=0;c<5;c++){
+        const d=document.createElement('div');
+        d.className='cell';
+        const val = player.card[r][c];
+        if(r===2 && c===2){ d.classList.add('free'); d.textContent='FREE'; }
+        else{ d.textContent=val; if(player.marks[r][c]) d.classList.add('marked'); }
+        d.addEventListener('click', ()=>{ if(!(r===2&&c===2)){ player.marks[r][c]=!player.marks[r][c]; d.classList.toggle('marked'); } });
+        cardDiv.appendChild(d);
+      }
+    }
+  }
+
+  function makePlayerCard(){
+    player.name=(nameInput.value||'PLAYER').trim();
+    player.seed=(seedJoin.value||'ROOM').trim();
+    if(!player.seed){ alert('Enter the room code / seed from host'); return; }
+    player.card = makeCard(player.seed, player.name);
+    player.marks=[ [false,false,false,false,false], [false,false,false,false,false], [false,false,true,false,false], [false,false,false,false,false], [false,false,false,false,false] ];
+    cardTitle.textContent = `${player.name}'s card`;
+    cardZone.classList.remove('hide');
+    renderCard();
+  }
+
+  if(!isHost){
+    makeCardBtn.addEventListener('click', makePlayerCard);
+    clearMarksBtn.addEventListener('click', ()=>{ if(!player.card){return;} player.marks=[ [false,false,false,false,false], [false,false,false,false,false], [false,false,true,false,false], [false,false,false,false,false], [false,false,false,false,false] ]; renderCard(); });
+
+    bingoBtn.addEventListener('click', ()=>{
+      if(!player.card){ alert('Make your card first'); return; }
+      // Create claim code with pattern "line" by default; players don't choose pattern
+      const code = encodeClaim(player.seed, 'line', player.name, player.card, player.marks);
+      claimText.value = code; claimWrap.classList.remove('hide');
+      copyMsg.textContent='';
+    });
+
+    copyClaimBtn.addEventListener('click', async ()=>{
+      try{ await navigator.clipboard.writeText(claimText.value); copyMsg.textContent='Copied!'; }catch(e){ copyMsg.textContent='Copy failed – select and copy manually.'; }
+    });
+  }
+
+  // Prefill from URL hash like #seed=ABC&name=Priya
+  const hashParams=new URLSearchParams(location.hash.slice(1));
+  const seedHash=hashParams.get('seed'); const nameHash=hashParams.get('name');
+  if(seedHash && !isHost){ seedJoin.value=seedHash; }
+  if(nameHash && !isHost){ nameInput.value=nameHash; }
+
+</script>
+</body>
+</html>
