@@ -174,45 +174,53 @@
 </div>
 
 <script>
-  // ===== 0) Put your Firebase config here once (players do NOT touch this) =====
-  // Get from Firebase console → Project settings → Your apps → SDK setup & config (web)
-  // Leave as null to disable live sync.
-  const FIREBASE_CFG = { apiKey: "AIzaSyDoJeplkPPNZ8u3a57lQgGyf2cJX5JuC_Y", authDomain: "deepavalibingo.firebaseapp.com", projectId: "deepavalibingo" }; // e.g., { apiKey:"…", authDomain:"…", projectId:"…" };
+  // ===== 0) Firebase config (keep yours) =====
+  const FIREBASE_CFG = { apiKey: "AIzaSyDoJeplkPPNZ8u3a57lQgGyf2cJX5JuC_Y",
+                         authDomain: "deepavalibingo.firebaseapp.com",
+                         projectId: "deepavalibingo" };
 
-  // ===== Fixed host token (numeric string). Change this to your random number. =====
-  const HOST_TOKEN = "428731"; // <- change me to your own random number
+  // ===== Host token (fixed) =====
+  const HOST_TOKEN = "428731"; // change to your own number if you want
+
+  // ===== Utilities: PRNG + helpers =====
+  function xmur3(str){ let h=1779033703^str.length; for(let i=0;i<str.length;i++){ h=Math.imul(h^str.charCodeAt(i),3432918353); h=h<<13|h>>>19; } return ()=>{ h=Math.imul(h^(h>>>16),2246822507); h=Math.imul(h^(h>>>13),3266489909); return (h^(h>>>16))>>>0; } }
+  function mulberry32(a){ return function(){ let t=a+=0x6D2B79F5; t=Math.imul(t^(t>>>15),t|1); t^=t+Math.imul(t^(t>>>7),t|61); return ((t^(t>>>14))>>>0)/4294967296; } }
+  function prngFromSeed(seedStr){ const seedGen=xmur3(seedStr); const a=seedGen(); return mulberry32(a); }
+  function shuffle(arr, rnd){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(rnd()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; }
+  function range(n, start=1){ return Array.from({length:n}, (_,i)=>i+start); }
+  function bLetter(n){ if(n<=15) return 'B'; if(n<=30) return 'I'; if(n<=45) return 'N'; if(n<=60) return 'G'; return 'O'; }
+
+  // ===== Card generation (75-ball) deterministic on seed+name =====
+  function makeCard(seed, name){
+    const key=(seed+"|"+(name||"").trim().toUpperCase());
+    const rnd=prngFromSeed(key);
     const cols=[range(15,1), range(15,16), range(15,31), range(15,46), range(15,61)];
     const card=[[],[],[],[],[]];
-    for(let c=0;c<5;c++){ const col=shuffle(cols[c].slice(), rnd).slice(0,5); for(let r=0;r<5;r++){ card[r][c]=col[r]; } }
-    card[2][2] = 'FREE';
+    for(let c=0;c<5;c++){
+      const col=shuffle(cols[c].slice(), rnd).slice(0,5);
+      for(let r=0;r<5;r++){ card[r][c]=col[r]; }
+    }
+    card[2][2]='FREE';
     return card; // 5x5 [row][col]
   }
 
   // ===== Draw order based on seed + host-only salt =====
-  function makeDrawOrder(seed, salt){ const nums=range(75,1); const rnd=prngFromSeed(seed+"|DRAW|"+salt); return shuffle(nums, rnd); }
+  function makeDrawOrder(seed, salt){
+    const nums=range(75,1);
+    const rnd=prngFromSeed(seed+"|DRAW|"+salt);
+    return shuffle(nums, rnd);
+  }
 
   // ===== Pattern checks =====
   function isWinning(card, marks, pattern){
-    const isMarked=(r,c)=> (r===2 && c===2) ? true : !!marks[r][c];
+    const isMarked=(r,c)=> (r===2&&c===2) ? true : !!marks[r][c];
     const full = pattern==='full';
-    if(pattern==='four'){
-      return isMarked(0,0)&&isMarked(0,4)&&isMarked(4,0)&&isMarked(4,4);
-    }
-    for(let r=0;r<5;r++){
-      let ok=true; for(let c=0;c<5;c++){ if(!isMarked(r,c)) { ok=false; break; } }
-      if(ok) return true;
-    }
-    for(let c=0;c<5;c++){
-      let ok=true; for(let r=0;r<5;r++){ if(!isMarked(r,c)) { ok=false; break; } }
-      if(ok) return true;
-    }
+    if(pattern==='four'){ return isMarked(0,0)&&isMarked(0,4)&&isMarked(4,0)&&isMarked(4,4); }
+    for(let r=0;r<5;r++){ let ok=true; for(let c=0;c<5;c++){ if(!isMarked(r,c)){ ok=false; break; } } if(ok) return true; }
+    for(let c=0;c<5;c++){ let ok=true; for(let r=0;r<5;r++){ if(!isMarked(r,c)){ ok=false; break; } } if(ok) return true; }
     let ok=true; for(let i=0;i<5;i++){ if(!isMarked(i,i)){ ok=false; break; } } if(ok) return true;
     ok=true; for(let i=0;i<5;i++){ if(!isMarked(i,4-i)){ ok=false; break; } } if(ok) return true;
-
-    if(full){
-      let all=true; for(let r=0;r<5;r++){ for(let c=0;c<5;c++){ if(!isMarked(r,c)) { all=false; break; } } }
-      if(all) return true;
-    }
+    if(full){ let all=true; for(let r=0;r<5;r++){ for(let c=0;c<5;c++){ if(!isMarked(r,c)){ all=false; break; } } } if(all) return true; }
     return false;
   }
 
@@ -220,11 +228,10 @@
   function encodeClaim(seed, pattern, playerName, card, marks){
     const nums=[]; const mk=[];
     for(let r=0;r<5;r++){ for(let c=0;c<5;c++){ nums.push(card[r][c]==='FREE'?0:card[r][c]); mk.push((r===2&&c===2)?1:(marks[r][c]?1:0)); } }
-    const payload={v:1,seed,pat:pattern,p:playerName.trim(),nums,mk};
-    const json=JSON.stringify(payload);
-    return btoa(unescape(encodeURIComponent(json)));
+    const payload={v:1,seed,pat:pattern,p:(playerName||'').trim(),nums,mk};
+    return btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
   }
-  function decodeClaim(code){ try{ const json=decodeURIComponent(escape(atob(code.trim()))); const obj=JSON.parse(json); return obj; }catch(e){ return null; } }
+  function decodeClaim(code){ try{ return JSON.parse(decodeURIComponent(escape(atob(code.trim())))); }catch(e){ return null; } }
 
   // ===== Firebase (optional) dynamic loader =====
   let sync={enabled:false,isHost:false,db:null,unsub:null};
@@ -255,21 +262,21 @@
     }catch(e){ console.warn('Sync failed', e); }
   }
 
-  // ===== Build UI =====
+  // ===== Build UI & mode detection =====
   const qs=(s)=>document.querySelector(s);
   const hostView=qs('#hostView');
   const playerView=qs('#playerView');
   const modePill=qs('#modePill');
 
-  const url=new URL(location.href);
   const hostParam = (new URL(location.href)).searchParams.get('host') || '';
   const isHost = hostParam === HOST_TOKEN;
-  modePill.textContent = isHost? 'HOST MODE' : 'PLAYER MODE';
+
+  modePill.textContent = isHost ? 'HOST MODE' : 'PLAYER MODE';
   hostView.classList.toggle('hide', !isHost);
   playerView.classList.toggle('hide', isHost);
 
   // ===== HOST LOGIC =====
-  let host={ seed:'', pattern:'line', order:[], idx:-1, drawn:new Set(), salt:'', key:hostToken };
+  let host={ seed:'', pattern:'line', order:[], idx:-1, drawn:new Set(), salt:'' };
   const seedInput=qs('#seedInput');
   const patternSelect=qs('#patternSelect');
   const startBtn=qs('#startBtn');
@@ -287,16 +294,12 @@
   const verifyText=qs('#verifyText');
   const verifyBtn=qs('#verifyBtn');
   const verifyResult=qs('#verifyResult');
-  const genHostLinkBtn=qs('#genHostLinkBtn');
-  const hostLock=qs('#hostLock');
   const syncBadgeHost=qs('#syncBadgeHost');
-
-  function generateToken(len=10){ const chars='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'; let s=''; const arr=new Uint8Array(len); (self.crypto||window.crypto).getRandomValues(arr); arr.forEach(v=> s+=chars[v%chars.length]); return s; }
 
   function setShareLinks(){
     const base = location.origin + location.pathname;
-    shareUrl.textContent = base; // players open plain URL
-    hostUrl.textContent = base + '?host=' + HOST_TOKEN;
+    shareUrl.textContent = base;                         // players open this
+    hostUrl.textContent  = base + '?host=' + HOST_TOKEN; // host link
   }
 
   function setSalt(newSalt){ host.salt = String(newSalt); if(host.seed){ localStorage.setItem('bingoSalt:'+host.seed, host.salt); } }
@@ -320,22 +323,18 @@
     const stored = localStorage.getItem('bingoSalt:'+host.seed);
     if(stored){ host.salt = stored; }
     else { setSalt((self.crypto||window.crypto).getRandomValues(new Uint32Array(1))[0]); }
-
     host.order = makeDrawOrder(host.seed, host.salt);
     host.idx=-1; host.drawn.clear();
     renderBall(); renderHistory();
     seedEcho.textContent = host.seed||'(enter above)';
-    shareUrl.textContent = location.origin + location.pathname;
-    hostUrl.textContent = location.origin + location.pathname + '?host=' + host.key;
+    setShareLinks();
     pushSyncState();
   }
   function next(){ if(!host.seed){ alert('Enter a seed first.'); return; } if(host.idx < host.order.length-1){ host.idx++; host.drawn.add(host.order[host.idx]); renderBall(); renderHistory(); pushSyncState(); } }
   function prev(){ if(host.idx>0){ host.idx--; renderBall(); pushSyncState(); } }
   function undo(){ if(host.idx>=0){ const last=host.order[host.idx]; host.drawn.delete(last); host.idx--; renderBall(); renderHistory(); pushSyncState(); } }
 
-  (async ()=>{
-    if(isHost && FIREBASE_CFG){ const ok=await initFirebase(); sync.isHost=!!ok; syncBadgeHost.textContent = ok? 'Sync: ON' : 'Sync: OFF'; }
-  })();
+  (async ()=>{ if(isHost && FIREBASE_CFG){ const ok=await initFirebase(); sync.isHost=!!ok; if(syncBadgeHost) syncBadgeHost.textContent = ok? 'Sync: ON' : 'Sync: OFF'; } })();
 
   if(isHost){
     patternSelect.addEventListener('change', e=> { host.pattern = e.target.value; pushSyncState(); });
@@ -346,7 +345,6 @@
     newRoundBtn.addEventListener('click', ()=>{ setSalt((self.crypto||window.crypto).getRandomValues(new Uint32Array(1))[0]); resetHost(); });
   }
 
-  
   // ===== PLAYER LOGIC =====
   const nameInput=qs('#nameInput');
   const seedJoin=qs('#seedJoin');
@@ -407,13 +405,17 @@
     liveZone.classList.remove('hide');
     renderCard();
 
-    // if sync is configured, subscribe automatically
     if(FIREBASE_CFG){
       initFirebase().then(()=>{
-        sync.enabled = true; sync.isHost = false; syncBadgePlayer.textContent='Sync: ON';
+        sync.enabled = true; sync.isHost = false; if(syncBadgePlayer) syncBadgePlayer.textContent='Sync: ON';
         if(sync.unsub) sync.unsub();
-        sync.unsub = roomDoc(player.seed).onSnapshot(doc=>{ const data=doc.data(); if(!data) return; remoteDrawn = new Set(data.drawn||[]); renderPlayerHistory(data.current||null); if(player.card) renderCard(); });
-      }).catch(()=>{ syncBadgePlayer.textContent='Sync: OFF'; });
+        sync.unsub = roomDoc(player.seed).onSnapshot(doc=>{
+          const data=doc.data(); if(!data) return;
+          remoteDrawn = new Set(data.drawn||[]);
+          renderPlayerHistory(data.current||null);
+          if(player.card) renderCard();
+        });
+      }).catch(()=>{ if(syncBadgePlayer) syncBadgePlayer.textContent='Sync: OFF'; });
     }
   }
 
@@ -453,7 +455,7 @@
     });
   }
 
-  // Prefill from URL hash like #seed=ABC&name=Priya
+  // Hash prefill
   const hashParams=new URLSearchParams(location.hash.slice(1));
   const seedHash=hashParams.get('seed'); const nameHash=hashParams.get('name');
   if(seedHash && !isHost){ seedJoin.value=seedHash; }
@@ -462,5 +464,6 @@
   // Initial share links
   setShareLinks();
 </script>
+
 </body>
 </html>
