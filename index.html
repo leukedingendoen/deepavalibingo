@@ -236,19 +236,25 @@
   // ===== Firebase (optional) dynamic loader =====
   let sync={enabled:false,isHost:false,db:null,unsub:null};
   function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=()=>rej(new Error('Load failed '+src)); document.head.appendChild(s); }); }
-  async function initFirebase(){
-    if(!FIREBASE_CFG) return false;
-    if(!window.firebase){
-      await loadScript('https://www.gstatic.com/firebasejs/10.12.3/firebase-app-compat.js');
-      await loadScript('https://www.gstatic.com/firebasejs/10.12.3/firebase-firestore-compat.js');
-      await loadScript('https://www.gstatic.com/firebasejs/10.12.3/firebase-auth-compat.js');
-    }
-    if(!firebase.apps.length){ firebase.initializeApp(FIREBASE_CFG); }
-    await firebase.auth().signInAnonymously().catch(()=>{});
-    sync.db=firebase.firestore();
-    sync.enabled=true;
-    return true;
+async function initFirebase(){
+  if(!FIREBASE_CFG) return false;
+  if(!window.firebase){
+    await loadScript('https://www.gstatic.com/firebasejs/10.12.3/firebase-app-compat.js');
+    await loadScript('https://www.gstatic.com/firebasejs/10.12.3/firebase-firestore-compat.js');
+    await loadScript('https://www.gstatic.com/firebasejs/10.12.3/firebase-auth-compat.js');
   }
+  if(!firebase.apps.length){ firebase.initializeApp(FIREBASE_CFG); }
+  try {
+    await firebase.auth().signInAnonymously();
+  } catch (e) {
+    console.error('Anonymous sign-in failed:', e);
+    return false; // <- do NOT claim success
+  }
+  if (!firebase.auth().currentUser) return false;
+  sync.db = firebase.firestore();
+  sync.enabled = true;
+  return true;
+}
   function roomDoc(seed){ return sync.db.collection('rooms').doc(seed); }
   async function pushSyncState(){
     if(!sync.enabled || !sync.isHost || !sync.db || !host.seed) return;
